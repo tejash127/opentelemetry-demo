@@ -244,10 +244,25 @@ func (p *productCatalog) ListProducts(ctx context.Context, req *pb.Empty) (*pb.L
 }
 
 func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductRequest) (*pb.Product, error) {
+
 	span := trace.SpanFromContext(ctx)
-	span.SetAttributes(
-		attribute.String("app.product.id", req.Id),
-	)
+	var productId string
+	var reference string
+	if strings.Contains(req.Id, `|`) {
+		var splitString = strings.Split(req.Id, `|`)
+
+		productId = splitString[0]
+		reference = splitString[1]
+		span.SetAttributes(
+			attribute.String("app.product.id", productId),
+			attribute.String("app.product.requestId", reference),
+		)
+		req.Id = productId
+	} else {
+		span.SetAttributes(
+			attribute.String("app.product.id", req.Id),
+		)
+	}
 
 	// GetProduct will fail on a specific product when feature flag is enabled
 	if p.checkProductFailure(ctx, req.Id) {

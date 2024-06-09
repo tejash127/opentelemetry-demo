@@ -29,6 +29,8 @@ WORKDIR /usr/src/app/
 
 COPY ./src/productcatalogservice/products/ ./products/
 COPY --from=builder /go/bin/productcatalogservice/ ./
+#COPY --from=builder ./src/productcatalogservice/gobinary/ ./
+#COPY ./src/productcatalogservice/gobinary/ ./
 
 EXPOSE ${PRODUCT_SERVICE_PORT}
 ENTRYPOINT [ "./productcatalogservice" ]

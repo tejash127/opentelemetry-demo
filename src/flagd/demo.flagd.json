@@ -17,7 +17,7 @@
         "on": true,
         "off": false
       },
-      "defaultVariant": "off"
+      "defaultVariant": "on"
     },
     "adServiceManualGc": {
       "description": "Triggers full manual garbage collections in the ad service",
@@ -44,7 +44,7 @@
         "on": true,
         "off": false
       },
-      "defaultVariant": "off",
+      "defaultVariant": "on",
       "targeting": {
         "fractional": [
           ["on", 10],
@@ -68,7 +68,7 @@
         "on": true,
         "off": false
       },
-      "defaultVariant": "off"
+      "defaultVariant": "on"
     },
     "paymentServiceFailure": {
       "description": "Fail payment service charge requests",
@@ -77,7 +77,7 @@
         "on": true,
         "off": false
       },
-      "defaultVariant": "off"
+      "defaultVariant": "on"
     },
     "paymentServiceUnreachable": {
       "description": "Payment service is unavailable",

@@ -5,8 +5,12 @@
 
 package oteldemo;
 
-import com.google.common.collect.ImmutableListMultimap;
-import com.google.common.collect.Iterables;
+import com.google.common.collect.*;
+import dev.openfeature.contrib.providers.flagd.FlagdOptions;
+import dev.openfeature.contrib.providers.flagd.FlagdProvider;
+import dev.openfeature.sdk.Client;
+import dev.openfeature.sdk.MutableContext;
+import dev.openfeature.sdk.OpenFeatureAPI;
 import io.grpc.*;
 import io.grpc.health.v1.HealthCheckResponse.ServingStatus;
 import io.grpc.protobuf.services.*;
@@ -25,12 +29,6 @@ import io.opentelemetry.context.Context;
 import io.opentelemetry.context.Scope;
 import io.opentelemetry.instrumentation.annotations.SpanAttribute;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Optional;
-import java.util.Random;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -45,7 +43,14 @@ import dev.openfeature.sdk.Client;
 import dev.openfeature.sdk.EvaluationContext;
 import dev.openfeature.sdk.MutableContext;
 import dev.openfeature.sdk.OpenFeatureAPI;
-import java.util.UUID;
+
+import java.io.IOException;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.Statement;
+import java.util.*;
+import java.util.stream.Collectors;
 
 
 public final class AdService {
@@ -138,6 +143,7 @@ public final class AdService {
     private static final Client ffClient = OpenFeatureAPI.getInstance().getClient();
     
     private AdServiceImpl() {}
+    private static final String uuid = UUID.randomUUID().toString();
 
     /**
      * Retrieves ads based on context provided in the request {@code AdRequest}.
@@ -152,6 +158,8 @@ public final class AdService {
 
       // get the current span in context
       Span span = Span.current();
+
+      getAdsFromDB(uuid);
       try {
         List<Ad> allAds = new ArrayList<>();
         AdRequestType adRequestType;
@@ -171,6 +179,7 @@ public final class AdService {
         CPULoad cpuload = CPULoad.getInstance();
         cpuload.execute(ffClient.getBooleanValue(ADSERVICE_HIGH_CPU_FEATURE_FLAG, false, evaluationContext));
 
+        span.setAttribute("app.ads.requestId", uuid);
         span.setAttribute("app.ads.contextKeys", req.getContextKeysList().toString());
         span.setAttribute("app.ads.contextKeys.count", req.getContextKeysCount());
         if (req.getContextKeysCount() > 0) {
@@ -212,6 +221,8 @@ public final class AdService {
         }
 
         AdResponse reply = AdResponse.newBuilder().addAllAds(allAds).build();
+        span.setAttribute("app.ads.ad_response_possible_redirect_urls", allAds.stream().map(Ad::getRedirectUrl).collect(Collectors.joining("|")));
+        logger.info(reply);
         responseObserver.onNext(reply);
         responseObserver.onCompleted();
       } catch (StatusRuntimeException e) {
@@ -224,7 +235,7 @@ public final class AdService {
     }
   }
 
-  private static final ImmutableListMultimap<String, Ad> adsMap = createAdsMap();
+  private static final ArrayListMultimap<String, Ad> adsMap = getAdsFromDB(AdServiceImpl.uuid);
 
   @WithSpan("getAdsByCategory")
   private Collection<Ad> getAdsByCategory(@SpanAttribute("app.ads.category") String category) {
@@ -269,51 +280,52 @@ public final class AdService {
     }
   }
 
-  private static ImmutableListMultimap<String, Ad> createAdsMap() {
-    Ad binoculars =
-        Ad.newBuilder()
-            .setRedirectUrl("/product/2ZYFJ3GM2N")
-            .setText("Roof Binoculars for sale. 50% off.")
-            .build();
-    Ad explorerTelescope =
-        Ad.newBuilder()
-            .setRedirectUrl("/product/66VCHSJNUP")
-            .setText("Starsense Explorer Refractor Telescope for sale. 20% off.")
-            .build();
-    Ad colorImager =
-        Ad.newBuilder()
-            .setRedirectUrl("/product/0PUK6V6EV0")
-            .setText("Solar System Color Imager for sale. 30% off.")
-            .build();
-    Ad opticalTube =
-        Ad.newBuilder()
-            .setRedirectUrl("/product/9SIQT8TOJO")
-            .setText("Optical Tube Assembly for sale. 10% off.")
-            .build();
-    Ad travelTelescope =
-        Ad.newBuilder()
-            .setRedirectUrl("/product/1YMWWN1N4O")
-            .setText(
-                "Eclipsmart Travel Refractor Telescope for sale. Buy one, get second kit for free")
-            .build();
-    Ad solarFilter =
-        Ad.newBuilder()
-            .setRedirectUrl("/product/6E92ZMYYFZ")
-            .setText("Solar Filter for sale. Buy two, get third one for free")
-            .build();
-    Ad cleaningKit =
-        Ad.newBuilder()
-            .setRedirectUrl("/product/L9ECAV7KIM")
-            .setText("Lens Cleaning Kit for sale. Buy one, get second one for free")
-            .build();
-    return ImmutableListMultimap.<String, Ad>builder()
-        .putAll("binoculars", binoculars)
-        .putAll("telescopes", explorerTelescope)
-        .putAll("accessories", colorImager, solarFilter, cleaningKit)
-        .putAll("assembly", opticalTube)
-        .putAll("travel", travelTelescope)
-        // Keep the books category free of ads to ensure the random code branch is tested
-        .build();
+  private static ArrayListMultimap<String, Ad> getAdsFromDB(String reference){
+    Connection c = null;
+    Statement stmt = null;
+    Map<String, List<Ad>> map = new HashMap<>();
+    String delimiter = "|";
+
+    try {
+      Class.forName("org.sqlite.JDBC");
+      c = DriverManager.getConnection("jdbc:sqlite:./openTelTestDb.db");
+      c.setAutoCommit(false);
+      logger.info("Database opened successfully.");
+
+      stmt = c.createStatement();
+      ResultSet rs = stmt.executeQuery( "SELECT * FROM ADVERTISE_DETAILS;" );
+
+      while ( rs.next() ) {
+        int id = rs.getInt("ID");
+        String productId= rs.getString("PRODUCT_ID");
+        String adText = rs.getString("AD_TEXT");
+        String adCategory = rs.getString("AD_CATEGORY");
+        float adWeight = rs.getFloat("AD_WEIGHT");
+
+        logger.info(adCategory + adText);
+        UUID uuid = UUID.randomUUID();
+        Ad adObject =
+                Ad.newBuilder()
+                        .setRedirectUrl("/product/"+productId+delimiter+reference)
+                        .setText(adText)
+                        .build();
+
+        List<Ad> list = map.getOrDefault(adCategory, new ArrayList<>());
+        list.add(adObject);
+        map.put(adCategory, list);
+        logger.info(adObject);
+      }
+      rs.close();
+      stmt.close();
+      c.close();
+    } catch ( Exception e ) {
+      System.err.println( e.getClass().getName() + ": " + e.getMessage() );
+      System.exit(0);
+    }
+
+    ArrayListMultimap<String, Ad> result = ArrayListMultimap.create();
+    map.forEach(result::putAll);
+    return result;
   }
 
   /** Main launches the server from the command line. */
